@@ -20,44 +20,22 @@ import time, math
 
 class TMC5160:
 
+    # Registers
     GCONF = 0x00
     GSTAT = 0X01
-    IFCNT = 0X02
-    SLAVECONF = 0X03
-    IOIN = 0X04             #THE SAME ADDRESS AS THE REGITER BELOW *** COULD BE WRONG ***
-    OUTPUT = 0X04
-    X_COMPARE = 0X05
-    OTP_PROG = 0X06
-    OTP_READ = 0X07
-    FACTORY_CONF = 0X08
-    SHORT_CONF = 0X09
     DRV_CONF = 0X0A
     GLOBALSCALER = 0X0B
-    OFFSET_READ = 0X0C
     IHOLD_IRUN = 0X10
     TPOWERDOWN = 0X11
-    TSTEP = 0X12
     TPWMTHRS = 0X13
-    TCOOLTHRS = 0X14
-    THIGH = 0X15
     RAMPMODE = 0X20
     XACTUAL = 0X21
     VACTUAL = 0X22
     VSTART = 0X23
-
     TZEROWAIT = 0X2C
     XTARGET = 0X2D
-    VDCMIN = 0X33
     SW_MODE = 0X34
     RAMP_STAT = 0X35
-    XLATCH = 0X36
-
-    # USED IN THE SMAPLE CODE
-    GCONF = 0X00
-    IHOLDIRUN = 0X10
-    TPOWERDOWN = 0X11
-    TPWMTHRS = 0X13
-    RAMPMODE = 0X20
     A1 = 0X24
     V1 = 0X25
     AMAX = 0X26
@@ -65,19 +43,10 @@ class TMC5160:
     DMAX = 0X28
     D1 = 0X2A
     VSTOP = 0X2B
-    XTARGET = 0X2D
     CHOPCONF = 0X6C
 
 
-
-
-
     maxCurrent = 2.8  # Max contiuous current capabilty of the board in Amps
-
-
-
-
-
 
 
     def __init__(self, spiObj: SPI, csPin: int, debug=0):
@@ -93,8 +62,16 @@ class TMC5160:
         self.writeReg(self.TPWMTHRS, 0x1F4)         # using the example value of 500
 
 
-    def twos_complement(self, val, nbits):
-        """Compute the 2's complement of int value val"""
+    def intToTwosComp(self, val, nbits):
+        """Compute the 2's complement of int value val 
+
+        Args:
+            val (int): Signed Integer to convert
+            nbits (int): The number of bits for the converted value
+
+        Returns:
+            int: an int that represents the raw twos complement
+        """
         if val < 0:
             val = (1 << nbits) + val
         else:
@@ -104,9 +81,17 @@ class TMC5160:
                 val = val - (1 << nbits)
         return val
 
-    def byteToIntSigned32(self, val):
-        if val & 2**31 > 0:
-            return val - 2**32
+    def TwosComp2Int(self, val, nbits):
+        """Compute an Integer (signed or unsigned) from a raw int (converted from bytearray)
+
+        Args:
+            val (int): Raw conversion from bytearray or bytes
+
+        Returns:
+            int: signed integer
+        """
+        if val & 2**(nbits-1) > 0:
+            return val - 2**nbits
         else:
             return val
 
@@ -116,7 +101,7 @@ class TMC5160:
         rb = bytearray(5)       # buffer for the data we get back
 
         if signed:
-            value = self.twos_complement(value, 32)
+            value = self.intToTwosComp(value, 32)
 
         data = 0x80             # first bit indicates a write.  
         data = address | data   # add in the address
@@ -153,18 +138,26 @@ class TMC5160:
         status = int.from_bytes(rb, 'big') >> 32
 
         if signed:
-            return self.byteToIntSigned32(int.from_bytes(rb, 'big')  & 0xFFFFFFFF), status
+            return self.TwosComp2Int(int.from_bytes(rb, 'big')  & 0xFFFFFFFF, 32), status
         else:
             return int.from_bytes(rb, 'big')  & 0xFFFFFFFF, status
 
     
 
 
-
-
-
     def setCurrent(self, current: float, idlePercent: float):
+        """Set the max current via the globalscaler.
+
+        Args:
+            current (float): In Amps
+            idlePercent (float): 0->100
+        """
         # set the glocal current scale
+        if current > self.maxCurrent:
+            raise AttributeError("Current exceeds board capability")
+        if idlePercent > 100 or idlePercent < 0:
+            raise AttributeError("Idle Current Percentage must be between 0 and 100")
+
         m = 255/self.maxCurrent
         gs = int(math.floor((current * m)))
         self.writeReg(self.GLOBALSCALER, gs)
@@ -176,8 +169,21 @@ class TMC5160:
 
         # set TPOWERDOWN to default (10)
         self.writeReg(self.TPOWERDOWN, 0x0A)
-        
+
+
     def setRamp(self, vstart, a1, v1, amax, vmax, dmax, d1, vstop):
+        """Configure the Ramp parameters
+
+        Args:
+            vstart (int): register value
+            a1 (int): register value
+            v1 (int): register value
+            amax (int): register value
+            vmax (int): register value
+            dmax (int): register value
+            d1 (int): register value
+            vstop (int): register value
+        """
         self.writeReg(self.VSTART, vstart)
         self.writeReg(self.A1, a1)
         self.writeReg(self.V1, v1)
@@ -188,19 +194,47 @@ class TMC5160:
         self.writeReg(self.VSTOP, vstop)
         self.writeReg(self.RAMPMODE, 0x00)
 
+
     def setAutoRamp(self, speed, accel):
+        """Configure a simple ramp
+
+        Args:
+            speed (int): the max speed
+            accel (int): general acceleration value
+        """
         self.setRamp(vstart=0, a1=accel, v1=int(speed/2), amax=int(accel/2), vmax=speed, \
                     dmax=int((accel*1.5)/2), d1=int(accel*1.5), vstop=10)  
 
+
     def moveToPos(self, pos):
-        # pos must be in the range  -2_147_483_648 -> 2_147_483_648
+        """Move the motor to a specific position.  
+
+        Args:
+            pos (int): the position in (micro)steps
+
+        Returns:
+            int: status (1 = error)
+        """
+        if pos < -2147483648 or pos > 2147483648:
+            raise AttributeError("Target postition out of range")
         return self.writeReg(self.XTARGET, pos, True) 
 
 
     def getPos(self):
+        """Read the current motor position
+
+        Returns:
+            int: the position in (micro)steps
+        """
         return self.readReg(self.XACTUAL, True)[0]
 
+
     def getStatus(self):
+        """Read the current driver status
+
+        Returns:
+            dict: Dictionary of status values
+        """
         x = self.readReg(self.XACTUAL, True)
         status = x[1]
         position = x[0]
@@ -223,24 +257,52 @@ class TMC5160:
             }
         return statDict
 
+
     def disable(self):
+        """Disable the motor
+        """
         self.writeReg(self.CHOPCONF, 0x0100C0)
     
+
     def enable(self):
+        """Enable the motor
+        """
         self.writeReg(self.CHOPCONF, 0x0100C3)
 
 
+    def setHomePosition(self):
+        """Set the current motor postion to 0
+        """
+        self.writeReg(self.XACTUAL, 0)
+
+
+    def configHoming(self, softStop, enableLeft, enableRight, invertLeft=False, invertRight=False):
+        """Set the parameters for the limit switches
+
+        Args:
+            softStop (bool): True = Soft Stop, False = Hard Stop (Emergency stop)
+            enableLeft (bool): enable the left limit switch
+            enableRight (bool): enable the right limit switch
+            invertLeft (bool, optional): Reverse the polarity of the left switch. Defaults to False.
+            invertRight (bool, optional): Reverse the polarity of the right switch. Defaults to False.
+        """
+        data = int(softStop) << 11
+        data = (int(invertLeft) << 2) | data
+        data = (int(invertRight) << 3) | data
+        data = int(enableLeft) | data
+        data = (int(enableRight) << 1) | data
+
+        self.writeReg(self.SW_MODE, data)
 
 
 
-"""
-ToDo:
-- function to reset home
 
-"""
 
 
 if __name__ == "__main__":
+    """Testing Routine
+    """
+        
     print("Starting...")
 
     led = Pin(25, Pin.OUT)
@@ -250,13 +312,33 @@ if __name__ == "__main__":
     spi.init(baudrate=4000000, firstbit=SPI.MSB, bits=8)
 
     stepper = TMC5160(spi, 5, 0)
+    stepper.setCurrent(1.6, 10)
 
-    stepper.setCurrent(2, 10)
-    stepper.setAutoRamp(speed=1000000, accel=50000)
+
+    # Homing
+    stepper.setAutoRamp(speed=30000, accel=50000)           # set homing speed
+    stepper.configHoming(True,  True, True, True, True)     # setup the hoping options
+    stepper.moveToPos(-51200 * 50)                          # start the homing move negative is to left
+    time.sleep_ms(10)                                       # Give the motor time to get moving
+    while stepper.getStatus()['standStill'] == False:
+        time.sleep_ms(5)
+
+    print("HOME FOUND")
+    
+    stepper.setHomePosition()
+    stepper.moveToPos(0)                                    # cancel the rest of the move
 
     print(stepper.getStatus())
+    time.sleep(1)
 
-    stepper.moveToPos(-51200 * 100)
+
+
+
+
+    # do a general move
+    stepper.setAutoRamp(speed=1000000, accel=50000)
+    
+    stepper.moveToPos(51200 * 10)
     while stepper.getStatus()['positionReached'] == False:
         time.sleep_ms(5)
         if stepper.getStatus()['velocityReached']:  led.high()
@@ -270,6 +352,8 @@ if __name__ == "__main__":
         else: led.low()
 
     print(stepper.getStatus())
+    
+
 
     stepper.disable()
 

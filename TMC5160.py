@@ -57,8 +57,8 @@ class TMC5160:
         self.spi = spiObj
         self.debug = debug
 
-        self.writeReg(self.GCONF, 0x04)   # enable PWM mode
-        self.writeReg(self.CHOPCONF, 0x0100C3)      # using the example
+        self.writeReg(self.GCONF, 0x04)             # enable PWM mode
+        self.writeReg(self.CHOPCONF, 0x0100C0)      # using the example
         self.writeReg(self.TPWMTHRS, 0x1F4)         # using the example value of 500
 
 
@@ -81,6 +81,7 @@ class TMC5160:
                 val = val - (1 << nbits)
         return val
 
+
     def TwosComp2Int(self, val, nbits):
         """Compute an Integer (signed or unsigned) from a raw int (converted from bytearray)
 
@@ -94,7 +95,6 @@ class TMC5160:
             return val - 2**nbits
         else:
             return val
-
 
 
     def writeReg(self, address: int, value: int, signed=False):
@@ -141,8 +141,6 @@ class TMC5160:
             return self.TwosComp2Int(int.from_bytes(rb, 'big')  & 0xFFFFFFFF, 32), status
         else:
             return int.from_bytes(rb, 'big')  & 0xFFFFFFFF, status
-
-    
 
 
     def setCurrent(self, current: float, idlePercent: float):
@@ -312,10 +310,11 @@ if __name__ == "__main__":
     spi.init(baudrate=4000000, firstbit=SPI.MSB, bits=8)
 
     stepper = TMC5160(spi, 5, 0)
+    stepper.enable()
     stepper.setCurrent(1.6, 10)
 
 
-    # Homing
+    # Homing to the left switch
     stepper.setAutoRamp(speed=30000, accel=50000)           # set homing speed
     stepper.configHoming(True,  True, True, True, True)     # setup the hoping options
     stepper.moveToPos(-51200 * 50)                          # start the homing move negative is to left
@@ -324,31 +323,28 @@ if __name__ == "__main__":
         time.sleep_ms(5)
 
     print("HOME FOUND")
-    
     stepper.setHomePosition()
     stepper.moveToPos(0)                                    # cancel the rest of the move
 
-    print(stepper.getStatus())
     time.sleep(1)
 
 
 
 
-
-    # do a general move
+    # Do a general move
     stepper.setAutoRamp(speed=1000000, accel=50000)
     
-    stepper.moveToPos(51200 * 10)
+    stepper.moveToPos(51200 * 30)
     while stepper.getStatus()['positionReached'] == False:
-        time.sleep_ms(5)
-        if stepper.getStatus()['velocityReached']:  led.high()
+        time.sleep_ms(1)
+        if stepper.getStatus()['velocityReached']:  led.high()          # turn on the LED once the motor gets to full speed
         else: led.low()
 
     print(stepper.getStatus())
     stepper.moveToPos(0)
     while stepper.getStatus()['positionReached'] == False:
-        time.sleep_ms(5)
-        if stepper.getStatus()['velocityReached']:  led.high()
+        time.sleep_ms(1)
+        if stepper.getStatus()['velocityReached']:  led.high()          # turn on the LED once the motor gets to full speed
         else: led.low()
 
     print(stepper.getStatus())

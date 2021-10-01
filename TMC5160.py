@@ -332,9 +332,9 @@ if __name__ == "__main__":
 
 
     # Do a general move
-    stepper.setAutoRamp(speed=1000000, accel=50000)
+    stepper.setAutoRamp(speed=1000000, accel=50000) #500000 speed is a good amount
     
-    stepper.moveToPos(51200 * 30)
+    stepper.moveToPos(51200 * 750)
     while stepper.getStatus()['positionReached'] == False:
         time.sleep_ms(1)
         if stepper.getStatus()['velocityReached']:  led.high()          # turn on the LED once the motor gets to full speed

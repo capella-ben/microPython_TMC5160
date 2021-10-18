@@ -3,15 +3,12 @@
 
 
 # Wiring:
-# Pico      -    AMIS-30543
+# Pico      -    TMC5160
 # SPIO-RX   -    DO     (4.7K pullup)
 # SPIO-TX   -    DI
 # SPIO-CSK  -    CLK
-# 5         -    CS
-# 15        -    NXT
-# Ground    -    GND
+# 15        -    CS
 # 
-# Also connect the motor power and the stepper driver.
 
 
 from machine import SPI, Pin
@@ -45,6 +42,20 @@ class TMC5160:
     VSTOP = 0X2B
     CHOPCONF = 0X6C
 
+    chopBaseVal = 0x0100C3      # The first 24 bits of CHOPCONF
+    microStepVal = 0x0
+
+    MicroStep256 = (256, 0x0)
+    MicroStep128 = (128, 0x1)
+    MicroStep64 = (64, 0x2)
+    MicroStep32 = (32, 0x3)
+    MicroStep16 = (16, 0x4)
+    MicroStep8 = (8, 0x5)
+    MicroStep4 = (4, 0x6)
+    MicroStep2 = (2, 0x7)
+    MicroStep1 = (1, 0x8)
+
+
 
     maxCurrent = 2.8  # Max contiuous current capabilty of the board in Amps
 
@@ -58,7 +69,7 @@ class TMC5160:
         self.debug = debug
 
         self.writeReg(self.GCONF, 0x04)             # enable PWM mode
-        self.writeReg(self.CHOPCONF, 0x0100C0)      # using the example
+        self.writeReg(self.CHOPCONF, self.chopBaseVal)      # using the example
         self.writeReg(self.TPWMTHRS, 0x1F4)         # using the example value of 500
 
 
@@ -150,12 +161,12 @@ class TMC5160:
             current (float): In Amps
             idlePercent (float): 0->100
         """
-        # set the glocal current scale
         if current > self.maxCurrent:
             raise AttributeError("Current exceeds board capability")
         if idlePercent > 100 or idlePercent < 0:
             raise AttributeError("Idle Current Percentage must be between 0 and 100")
 
+        # set the glocal current scale
         m = 255/self.maxCurrent
         gs = int(math.floor((current * m)))
         self.writeReg(self.GLOBALSCALER, gs)
@@ -259,14 +270,19 @@ class TMC5160:
     def disable(self):
         """Disable the motor
         """
-        self.writeReg(self.CHOPCONF, 0x0100C0)
+        #self.writeReg(self.CHOPCONF, 0x050100C0)
+        self.writeReg(self.CHOPCONF, (self.chopBaseVal  & 0xFFFFF0) | (self.microStepVal << 24))
     
 
     def enable(self):
         """Enable the motor
         """
-        self.writeReg(self.CHOPCONF, 0x0100C3)
+        self.writeReg(self.CHOPCONF, self.chopBaseVal  | (self.microStepVal << 24))
+        #self.writeReg(self.CHOPCONF, 0x050100C3)
 
+    def setStepMode(self, msMode):
+        self.microStepVal = msMode[1]
+        self.writeReg(self.CHOPCONF, self.chopBaseVal  | (self.microStepVal << 24))
 
     def setHomePosition(self):
         """Set the current motor postion to 0
@@ -309,14 +325,16 @@ if __name__ == "__main__":
     spi = SPI(0)
     spi.init(baudrate=4000000, firstbit=SPI.MSB, bits=8)
 
-    stepper = TMC5160(spi, 5, 0)
+    stepper = TMC5160(spi, 15, 0)
     stepper.enable()
-    stepper.setCurrent(1.6, 10)
+    stepper.setCurrent(1.7, 15)
+    print(stepper.getStatus())
 
 
+    
     # Homing to the left switch
     stepper.setAutoRamp(speed=30000, accel=50000)           # set homing speed
-    stepper.configHoming(True,  True, True, True, True)     # setup the hoping options
+    stepper.configHoming(True,  True, False, True, True)     # setup the hoping options
     stepper.moveToPos(-51200 * 50)                          # start the homing move negative is to left
     time.sleep_ms(10)                                       # Give the motor time to get moving
     while stepper.getStatus()['standStill'] == False:
@@ -327,18 +345,20 @@ if __name__ == "__main__":
     stepper.moveToPos(0)                                    # cancel the rest of the move
 
     time.sleep(1)
+     
 
-
+    stepper.setStepMode(stepper.MicroStep32)
 
 
     # Do a general move
-    stepper.setAutoRamp(speed=1000000, accel=50000) #500000 speed is a good amount
+    stepper.setAutoRamp(speed=50000, accel=10000) 
     
-    stepper.moveToPos(51200 * 750)
+    stepper.moveToPos(200 * 32 * 10)
     while stepper.getStatus()['positionReached'] == False:
         time.sleep_ms(1)
         if stepper.getStatus()['velocityReached']:  led.high()          # turn on the LED once the motor gets to full speed
         else: led.low()
+    time.sleep(1)
 
     print(stepper.getStatus())
     stepper.moveToPos(0)
@@ -349,7 +369,7 @@ if __name__ == "__main__":
 
     print(stepper.getStatus())
     
-
+    #time.sleep(2)
 
     stepper.disable()
 

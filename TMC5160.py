@@ -42,8 +42,9 @@ class TMC5160:
     VSTOP = 0X2B
     CHOPCONF = 0X6C
 
-    chopBaseVal = 0x0100C3      # The first 24 bits of CHOPCONF
+    chopBaseVal = 0      # The first 24 bits of CHOPCONF
     microStepVal = 0x0
+    microStep = 256
 
     MicroStep256 = (256, 0x0)
     MicroStep128 = (128, 0x1)
@@ -61,6 +62,13 @@ class TMC5160:
 
 
     def __init__(self, spiObj: SPI, csPin: int, debug=0):
+        """Initialise
+
+        Args:
+            spiObj (SPI): The SPI object to use.
+            csPin (int): The cs pin number
+            debug (int, optional): Enable debug. Defaults to 0.
+        """
 
         self.cs = Pin(csPin, Pin.OUT)
         self.cs.high()
@@ -69,7 +77,7 @@ class TMC5160:
         self.debug = debug
 
         self.writeReg(self.GCONF, 0x04)             # enable PWM mode
-        self.writeReg(self.CHOPCONF, self.chopBaseVal)      # using the example
+        self.setChopperConfig(3, 0, 13, 2, 0, False)
         self.writeReg(self.TPWMTHRS, 0x1F4)         # using the example value of 500
 
 
@@ -93,7 +101,7 @@ class TMC5160:
         return val
 
 
-    def TwosComp2Int(self, val, nbits):
+    def TwosComp2Int(self, val, nbits) -> int:
         """Compute an Integer (signed or unsigned) from a raw int (converted from bytearray)
 
         Args:
@@ -109,8 +117,17 @@ class TMC5160:
 
 
     def writeReg(self, address: int, value: int, signed=False):
-        rb = bytearray(5)       # buffer for the data we get back
+        """Write to a register.  Can write to a signed register.
 
+        Args:
+            address (int): The address to write to.
+            value (int): The value to write
+            signed (bool, optional): Convert the value to a two's compliment signed integer. Defaults to False.
+
+        Returns:
+            int: Status of the write
+        """
+        rb = bytearray(5)       # buffer for the data we get back
         if signed:
             value = self.intToTwosComp(value, 32)
 
@@ -131,8 +148,16 @@ class TMC5160:
 
 
     def readReg(self, address: int, signed=False):
-        rb = bytearray(5)       # buffer for the data we get back
+        """Read a register.  Can convert a signed integer value.
 
+        Args:
+            address (int): The address to read
+            signed (bool, optional): Converts a two's compliment number. Defaults to False.
+
+        Returns:
+            tuple: The value read from the register and the status.
+        """
+        rb = bytearray(5)       # buffer for the data we get back
         data = address << 32
 
         self.cs.low()
@@ -180,7 +205,7 @@ class TMC5160:
         self.writeReg(self.TPOWERDOWN, 0x0A)
 
 
-    def setRamp(self, vstart, a1, v1, amax, vmax, dmax, d1, vstop):
+    def setRamp(self, vstart: int, a1: int, v1: int, amax: int, vmax: int, dmax: int, d1: int, vstop: int):
         """Configure the Ramp parameters
 
         Args:
@@ -193,6 +218,15 @@ class TMC5160:
             d1 (int): register value
             vstop (int): register value
         """
+        assert 0 <= vstart <= 0x3FFFF,      "vstart is out or range"
+        assert 0 <= a1 <= 0xFFFF,           "a1 is out of range"
+        assert 0 <= v1 <= 0xFFFFF,          "v1 is out of range"
+        assert 0 <= amax <= 0xFFFF,         "amax is out of range"
+        assert 0 <= vmax <= 0x7FFFFF,       "vmax is out of range"
+        assert 0 <= dmax <= 0xFFFF,         "dmax is out of range"
+        assert 0 <= d1 <= 0xFFFF,           "d1 is out of range"
+        assert 0 <= vstop <= 0x3FFFF,       "vstop is out of range"
+
         self.writeReg(self.VSTART, vstart)
         self.writeReg(self.A1, a1)
         self.writeReg(self.V1, v1)
@@ -204,7 +238,7 @@ class TMC5160:
         self.writeReg(self.RAMPMODE, 0x00)
 
 
-    def setAutoRamp(self, speed, accel):
+    def setAutoRamp(self, speed: int, accel: int):
         """Configure a simple ramp
 
         Args:
@@ -215,7 +249,7 @@ class TMC5160:
                     dmax=int((accel*1.5)/2), d1=int(accel*1.5), vstop=10)  
 
 
-    def moveToPos(self, pos):
+    def moveToPos(self, pos: int):
         """Move the motor to a specific position.  
 
         Args:
@@ -280,8 +314,14 @@ class TMC5160:
         self.writeReg(self.CHOPCONF, self.chopBaseVal  | (self.microStepVal << 24))
         #self.writeReg(self.CHOPCONF, 0x050100C3)
 
-    def setStepMode(self, msMode):
+    def setStepMode(self, msMode: tuple):
+        """Set the Microstepping mode
+
+        Args:
+            msMode (Microstep tupple values): eg: self.MicroStep256
+        """
         self.microStepVal = msMode[1]
+        self.microStep = msMode[0]
         self.writeReg(self.CHOPCONF, self.chopBaseVal  | (self.microStepVal << 24))
 
     def setHomePosition(self):
@@ -309,6 +349,36 @@ class TMC5160:
         self.writeReg(self.SW_MODE, data)
 
 
+    def setChopperConfig(self, tOff: int, hStart: int, hEnd: int, tbl: int, tpfd: int, vHigh=False):
+        """Set the Chopper Configuration Parameters. Chopper mode is always set to SpreadCycle (0). See the data sheet for full explaniations. 
+
+        Args:   
+            tOff (int): off time setting.
+            hStart (int): hysteresis start value.
+            hEnd (int): hysteresis end value.
+            tbl (int): blank time select.
+            tpfd (int): passive fast decay time.
+            vHigh (bool, optional): Enable high velicity settings. Defaults to False.
+        """
+        assert 2 <= tOff <= 15,     "tOff Out of range: 2->15"
+        assert 0 <= hStart <= 7,    "hStart Out of range: 0->7"
+        assert 0 <= hEnd <= 15,     "hEnd Out of range: 0->15"
+        assert 0 <= tbl <= 3,       "tbl Out of range: 0->3"
+        assert 0 <= tpfd <= 15,     "tpfd Out of range: 0->15"
+        
+        ccVal = tOff
+        ccVal = (hStart << 4) + ccVal
+        ccVal = (hEnd << 7) + ccVal
+        ccVal = (tbl << 15) + ccVal
+        ccVal = (tpfd << 20) + ccVal
+        if vHigh:               # enable vhighchm and vhighfs
+            ccVal = (3 << 18) + ccVal
+        ccVal = (self.microStepVal << 24) + ccVal
+
+        self.chopBaseVal = ccVal
+        self.writeReg(self.CHOPCONF, self.chopBaseVal) 
+
+
 
 
 
@@ -325,53 +395,58 @@ if __name__ == "__main__":
     spi = SPI(0)
     spi.init(baudrate=4000000, firstbit=SPI.MSB, bits=8)
 
-    stepper = TMC5160(spi, 15, 0)
-    stepper.enable()
-    stepper.setCurrent(1.7, 15)
-    print(stepper.getStatus())
-
+    stepperA = TMC5160(spi, 10, 0)
+    #stepperB = TMC5160(spi, 11, 0)
+    #stepperC = TMC5160(spi, 12, 0)
+    #stepperD = TMC5160(spi, 13, 0)
+    #stepperE = TMC5160(spi, 16, 0)
+    #stepperF = TMC5160(spi, 15, 0)
+    
+    stepperA.enable()
+    stepperA.setCurrent(0.7, 15)
+    print(stepperA.getStatus())
+    stepperA.setStepMode(stepperA.MicroStep64)
 
     
     # Homing to the left switch
-    stepper.setAutoRamp(speed=30000, accel=50000)           # set homing speed
-    stepper.configHoming(True,  True, False, True, True)     # setup the hoping options
-    stepper.moveToPos(-51200 * 50)                          # start the homing move negative is to left
+    stepperA.setAutoRamp(speed=20000, accel=8000)           # set homing speed
+    stepperA.configHoming(softStop=True,  enableLeft=True, enableRight=True, invertLeft=True, invertRight=True)     # setup the hoping options
+    stepperA.moveToPos(-51200 * 50)                          # start the homing move negative is to left
     time.sleep_ms(10)                                       # Give the motor time to get moving
-    while stepper.getStatus()['standStill'] == False:
+    while stepperA.getStatus()['standStill'] == False:
         time.sleep_ms(5)
 
     print("HOME FOUND")
-    stepper.setHomePosition()
-    stepper.moveToPos(0)                                    # cancel the rest of the move
+    stepperA.setHomePosition()
+    stepperA.moveToPos(0)                                    # cancel the rest of the move
 
     time.sleep(1)
      
 
-    stepper.setStepMode(stepper.MicroStep32)
-
-
     # Do a general move
-    stepper.setAutoRamp(speed=50000, accel=10000) 
+    stepperA.setAutoRamp(speed=700000, accel=8000) 
     
-    stepper.moveToPos(200 * 32 * 10)
-    while stepper.getStatus()['positionReached'] == False:
+    stepperA.moveToPos(200 * stepperA.microStep * 100)
+    while stepperA.getStatus()['positionReached'] == False:
         time.sleep_ms(1)
-        if stepper.getStatus()['velocityReached']:  led.high()          # turn on the LED once the motor gets to full speed
+        if stepperA.getStatus()['velocityReached']:  led.high()          # turn on the LED once the motor gets to full speed
         else: led.low()
     time.sleep(1)
-
-    print(stepper.getStatus())
-    stepper.moveToPos(0)
-    while stepper.getStatus()['positionReached'] == False:
+    
+    print(stepperA.getStatus())
+    stepperA.moveToPos(0)
+    while stepperA.getStatus()['positionReached'] == False:
         time.sleep_ms(1)
-        if stepper.getStatus()['velocityReached']:  led.high()          # turn on the LED once the motor gets to full speed
+        if stepperA.getStatus()['velocityReached']:  led.high()          # turn on the LED once the motor gets to full speed
         else: led.low()
 
-    print(stepper.getStatus())
-    
-    #time.sleep(2)
+    print(stepperA.getStatus())
 
-    stepper.disable()
+
+    #time.sleep(5)
+    print(stepperA.readReg(stepperA.CHOPCONF))
+    
+    stepperA.disable()
 
 
 

@@ -14,48 +14,52 @@ led.low()
 spi = SPI(0)
 spi.init(baudrate=4000000, firstbit=SPI.MSB, bits=8)
 
-stepper1 = TMC5160(spi, 5, 0)
-stepper1.enable()
-stepper1.setCurrent(1, 10)
+stepperC = TMC5160(spi, 12, 0)
+stepperD = TMC5160(spi, 13, 0)
 
-stepper2 = TMC5160(spi, 15, 0)
-stepper2.enable()
-stepper2.setCurrent(1.8, 10)
+stepperA = TMC5160(spi, 10, 0)
+stepperA.enable()
+stepperA.setCurrent(0.75, 15)
 
+stepperB = TMC5160(spi, 11, 0)
+stepperB.enable()
+stepperB.setCurrent(0.75, 15)
 
+stepperA.setStepMode(stepperA.MicroStep64)
+stepperB.setStepMode(stepperB.MicroStep32)
 
 
 # Do a general move
-stepper1.setAutoRamp(speed=500000, accel=30000) #500000 speed is a good amount
-stepper2.setAutoRamp(speed=200000, accel=50000) #500000 speed is a good amount
+stepperA.setAutoRamp(speed=5000, accel=30000) #500000 speed is a good amount
+stepperB.setAutoRamp(speed=50000, accel=50000) #500000 speed is a good amount
 
-stepper1.moveToPos(51200 * 10)
-stepper2.moveToPos(51200 * 2)
-while stepper1.getStatus()['positionReached'] == False:
-    while stepper2.getStatus()['positionReached'] == False:
+stepperA.moveToPos(200 * 64 * 1)
+stepperB.moveToPos(200 * 32 * 7)
+while stepperA.getStatus()['positionReached'] == False:
+    while stepperB.getStatus()['positionReached'] == False:
         time.sleep_ms(1)
 
 
 print()
-print("mid 1: ",stepper1.getStatus())
-print("mid 2: ",stepper2.getStatus())
+print("mid 1: ",stepperA.getStatus())
+print("mid 2: ",stepperB.getStatus())
 
 #time.sleep(1)
 
-stepper1.moveToPos(0)
-stepper2.moveToPos(0)
-while stepper1.getStatus()['positionReached'] == False:
-    while stepper2.getStatus()['positionReached'] == False:
+stepperA.moveToPos(0)
+stepperB.moveToPos(0)
+while stepperA.getStatus()['positionReached'] == False:
+    while stepperB.getStatus()['positionReached'] == False:
         time.sleep_ms(1)
 
 print()
-print("1: ", stepper1.getStatus())
-print("2: ", stepper2.getStatus())
+print("1: ", stepperA.getStatus())
+print("2: ", stepperB.getStatus())
 
 
 
-stepper1.disable()
-stepper2.disable()
+stepperA.disable()
+stepperB.disable()
 
 
 
